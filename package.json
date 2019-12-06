@@ -16,7 +16,9 @@
     "dev": "tsdx test --watch",
     "lint": "tsdx lint"
   },
-  "peerDependencies": {},
+  "peerDependencies": {
+    "mobx": "^5.15.0"
+  },
   "husky": {
     "hooks": {
       "pre-commit": "tsdx lint"
@@ -34,5 +36,6 @@
     "tsdx": "^0.11.0",
     "tslib": "^1.10.0",
     "typescript": "^3.7.3"
-  }
+  },
+  "dependencies": {}
 }
