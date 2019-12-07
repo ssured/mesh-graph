@@ -77,27 +77,44 @@ export class Core implements CRDT {
     };
   })();
 
-  protected hub = new EventHub<CRDTNodeMessage>(
-    (source, message) => listener => {
-      if (message.type === 'put') {
-        if (Object.keys(message.payload.value).length === 0) {
-          return false; // skip further processing
-        }
-
-        if (source !== this.listener) {
-          // intercept put messages from others
-          // don't forward these messages to everybody, but handle it ourselves
-          this._getMsgIdsCache(source).add(message.msgId);
-          return listener === this.listener;
-        } else {
-          // do not send our put messages to their original source
-          return !this._getMsgIdsCache(listener).has(message.payload.replyTo!);
-        }
+  protected hub = new EventHub<CRDTNodeMessage>((source, message) => {
+    if (message.type === 'put') {
+      if (Object.keys(message.payload.value).length === 0) {
+        return () => false; // skip all further processing
       }
 
-      return true;
+      if (source !== this.listener) {
+        // intercept put messages from others
+        // don't forward these messages to everybody, but handle it ourselves
+        this._getMsgIdsCache(source).add(message.msgId);
+        return listener => listener === this.listener;
+      } else {
+        // do not send our put messages to their original source
+        return listener =>
+          !this._getMsgIdsCache(listener).has(message.payload.replyTo!);
+      }
     }
-  );
+
+    // Just an idea, maybe it's ok to have a dominant core, which wont propagate
+    // get messages if it knows the correct value
+    // if (
+    //   message.type === 'get' &&
+    //   source !== this.listener &&
+    //   this.isReady(message.payload.key)
+    // ) {
+    //   // reply with the data and do not propagate the get request
+    //   source(
+    //     new PutMessage(
+    //       message.payload.key,
+    //       this.get(message.payload.key)!,
+    //       message
+    //     )
+    //   );
+    //   return () => false;
+    // }
+
+    return () => true;
+  });
   public connect = this.hub.connect.bind(this.hub);
 
   constructor(options: Partial<typeof defaultCoreConfig> = {}) {
@@ -151,7 +168,7 @@ export class Core implements CRDT {
   }
 
   public isReady(id: string) {
-    return this.pendingIds.has(id);
+    return this.has(id) && this.pendingIds.has(id);
   }
 
   protected setPending(id: string, disposer: Lambda) {
