@@ -1,10 +1,10 @@
 {
-  "name": "crdt-graph",
+  "name": "mesh-graph",
   "version": "0.1.0",
   "license": "MIT",
   "author": "Sjoerd de Jong",
   "main": "dist/index.js",
-  "module": "dist/crdt-graph.esm.js",
+  "module": "dist/mesh-graph.esm.js",
   "typings": "dist/index.d.ts",
   "files": [
     "dist"
