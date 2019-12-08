@@ -1,6 +1,6 @@
 {
   "name": "mesh-graph",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "license": "MIT",
   "author": "Sjoerd de Jong",
   "main": "dist/index.js",
@@ -14,8 +14,7 @@
     "build": "tsdx build",
     "test": "tsdx test",
     "dev": "tsdx test --watch",
-    "lint": "tsdx lint",
-    "publish": "npm run build && npm publish"
+    "lint": "tsdx lint"
   },
   "peerDependencies": {
     "mobx": "^5.15.0"
