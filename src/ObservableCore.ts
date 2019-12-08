@@ -161,9 +161,9 @@ export class ObservableCore<Shape extends Everything = Everything> {
 
     const setPropIsObserved = action(() => this.observedKeys.add(key));
     setPropIsObserved(); // default to assume we are in an observable context
-    onBecomeObserved(subjectBox, setPropIsObserved);
+    onBecomeObserved(subjectBox, () => setTimeout(setPropIsObserved, 0));
     const setPropIsUnobserved = action(() => this.observedKeys.delete(key));
-    onBecomeUnobserved(subjectBox, setPropIsUnobserved);
+    onBecomeUnobserved(subjectBox, () => setTimeout(setPropIsUnobserved, 0));
 
     this.subjectBoxes.set(key, subjectBox);
     return subjectBox;
