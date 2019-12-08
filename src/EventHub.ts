@@ -17,7 +17,7 @@ export class EventHub<Message> {
     source: (message: Message) => void,
     message: Message
   ): void => {
-    for (const listener of [...this._listeners.values()]
+    for (const listener of Array.from(this._listeners)
       .filter(listener => listener !== source)
       .filter(this.intercept(source, message))) {
       listener(message);
