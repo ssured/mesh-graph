@@ -1,185 +1,155 @@
+import { createAtom, IAtom } from 'mobx';
 import { Core, Emit, PutMessage } from './Core';
-import {
-  observable,
-  IObservableValue,
-  onBecomeObserved,
-  action,
-  onBecomeUnobserved,
-  runInAction,
-} from 'mobx';
-import {
-  StorableValue,
-  Everything,
-  StorableObject,
-  PropTypes,
-  Value,
-  valueAt,
-  PropertyState,
-} from './crdt';
+import { Everything, PropTypes, StorableValue, Value, valueAt } from './crdt';
 
-class ObservableSubject<Shape extends StorableObject> {
-  constructor(
-    protected notifyPropertyChange: (key: string, value: StorableValue) => void,
-    protected getProperty: (key: string) => StorableValue
-  ) {}
+const uuidLookup = new WeakMap<object, string>();
 
-  private propertyBoxes = new Map<string, IObservableValue<StorableValue>>();
-  private getPropertyBox(key: string): IObservableValue<StorableValue> {
-    const current = this.propertyBoxes.get(key);
+class SubjectHandler {
+  constructor(protected graph: ObservableCore, public readonly uuid: string) {}
+
+  private observedCount = 0;
+  private addObserved = (): void => {
+    if (this.observedCount === 0) {
+      this.graph.onObserved(this.uuid);
+    }
+    this.observedCount += 1;
+  };
+  private removeObserved = (): void => {
+    this.observedCount -= 1;
+    if (this.observedCount === 0) {
+      this.graph.onUnobserved(this.uuid);
+    }
+  };
+
+  private thisAtom = createAtom(
+    `[${this.uuid}]`,
+    this.addObserved,
+    this.removeObserved
+  );
+  private propertyAtoms = new Map<string, IAtom>();
+
+  private getPropertyAtom(key: string): IAtom {
+    const current = this.propertyAtoms.get(key);
     if (current) return current;
 
-    const propertyBox = observable.box<StorableValue>(this.getProperty(key));
-    this.propertyBoxes.set(key, propertyBox);
-    return propertyBox;
+    const atom = createAtom(
+      `[${this.uuid}]:${key}`,
+      this.addObserved,
+      this.removeObserved
+    );
+    this.propertyAtoms.set(key, atom);
+    this.thisAtom.reportChanged();
+    return atom;
   }
 
-  set(
-    key: string,
-    value: Exclude<StorableValue, undefined>,
-    notify: boolean = false
-  ) {
-    const box = this.getPropertyBox(key);
-    if (box.get() !== value) {
-      runInAction(() => this.ownKeys.add(key));
-      box.set(value);
-      if (notify) {
-        this.notifyPropertyChange(key, value);
+  public get observed() {
+    return this.observedCount > 0;
+  }
+
+  public notifyChange(property: string) {
+    if (!this.propertyAtoms.has(property)) return;
+    this.getPropertyAtom(property).reportChanged();
+  }
+
+  private _proxy: any;
+  public get proxy() {
+    this.thisAtom.reportObserved();
+
+    if (this._proxy) return this._proxy;
+    this._proxy = new Proxy<any>(
+      {},
+      {
+        get: (_: any, key: string | number | symbol) => {
+          if (typeof key !== 'string') return Reflect.get(_, key);
+          this.getPropertyAtom(key).reportObserved();
+          return this.graph.get(this.uuid, key);
+        },
+        set: (_: any, key: string | number | symbol, value: any) => {
+          if (typeof key !== 'string') return Reflect.set(_, key, value);
+          if (value === undefined) return false;
+          this.graph.set(this.uuid, key, value);
+          this.notifyChange(key);
+          return true;
+        },
+        getOwnPropertyDescriptor,
+        ownKeys: () => {
+          return Array.from(this.propertyAtoms.keys());
+        },
       }
-    }
-  }
+    );
 
-  private ownKeys = observable.set<string>();
-  public proxy = new Proxy<Shape>({} as any, {
-    get: (_: any, key: string | number | symbol) => {
-      if (typeof key !== 'string') return Reflect.get(_, key);
-      return this.getPropertyBox(key).get();
-    },
-    set: (_: any, key: string | number | symbol, value: any) => {
-      if (typeof key !== 'string') return Reflect.set(_, key, value);
-      if (value === undefined) return false;
-      this.set(key, value, true);
-      return true;
-    },
-    getOwnPropertyDescriptor,
-    ownKeys: () => {
-      return Array.from(this.ownKeys);
-    },
-  });
+    uuidLookup.set(this._proxy, this.uuid);
+    return this._proxy;
+  }
 }
 
 export class ObservableCore<Shape extends Everything = Everything> {
-  public readonly observedKeys = observable.set<string>();
+  private emit!: Emit;
 
-  protected emit!: Emit;
-  constructor(public readonly core: Core) {
+  constructor(
+    public onObserved: (key: string) => void,
+    public onUnobserved: (key: string) => void,
+    public readonly core: Core
+  ) {
     core.connect(emit => {
       this.emit = emit;
       return message => {
         if (message.type !== 'put') return;
         const { key, value } = message.payload;
 
-        if (!this.subjectBoxes.has(key)) return;
-
+        if (!this.subjectCache.has(key)) return;
         const subject = this.getSubject(key);
-        const coreSubject = core.get(key);
-        const now = core.getCurrentState();
-
         for (const property of Object.keys(value)) {
-          const value = valueAt(now, coreSubject[property] || {});
-          if (value === undefined) continue;
-          subject.set(property, this.toStorableValue(value), false);
+          subject.notifyChange(property);
         }
       };
     });
   }
 
-  private subjectBoxes = new Map<
-    string,
-    IObservableValue<ObservableSubject<Shape[string]>>
-  >();
+  protected subjectCache = new Map<string, SubjectHandler>();
+  protected getSubject(uuid: string): SubjectHandler {
+    const current = this.subjectCache.get(uuid);
+    if (current) return current;
 
-  private idForProxyMap = new WeakMap<StorableObject, string>();
+    const handler: SubjectHandler = new SubjectHandler(this, uuid);
+    this.subjectCache.set(uuid, handler);
+    // this.emit(new GetMessage(uuid));
+    return handler;
+  }
 
-  public getId(object: StorableObject): string | undefined {
-    return this.idForProxyMap.get(object);
+  public get(subject: string, property: string): StorableValue {
+    const value = valueAt(
+      this.core.getCurrentState(),
+      this.core.get(subject)[property] || {}
+    );
+    return value === undefined ? undefined : this.toStorableValue(value);
+  }
+
+  public set(subject: string, property: string, value: StorableValue) {
+    this.emit(
+      new PutMessage(subject, {
+        [property]: { [this.core.getCurrentState()]: this.toValue(value) },
+      })
+    );
   }
 
   private toValue(storableValue: StorableValue): Value {
     if (storableValue === undefined) {
       throw new Error('cannot convert undefined value');
     }
-    if (typeof storableValue !== 'object' || storableValue === null) {
+    if (storableValue == null || typeof storableValue !== 'object') {
       return [PropTypes.Primitive, storableValue];
     }
-    const id = this.getId(storableValue);
+    const id = uuidLookup.get(storableValue);
     if (id == null)
       throw new Error(`cannot convert ${JSON.stringify(storableValue)}`);
 
     return [PropTypes.Reference, id];
   }
+
   private toStorableValue(value: Value): Exclude<StorableValue, undefined> {
     return value[0] === PropTypes.Primitive ? value[1] : this.root[value[1]];
   }
-
-  protected getSubjectBox(
-    key: string
-  ): IObservableValue<ObservableSubject<Shape[string]>> {
-    const current = this.subjectBoxes.get(key);
-    if (current) return current;
-
-    const onPropertyChange = (
-      property: string,
-      storableValue: StorableValue
-    ): void => {
-      if (storableValue === undefined) return;
-
-      this.emit(
-        new PutMessage(key, {
-          [property]: {
-            [this.core.getCurrentState()]: this.toValue(storableValue),
-          },
-        })
-      );
-    };
-
-    const getStorableValueOfProperty = (property: string): StorableValue => {
-      const propState: PropertyState | undefined = this.core.get(key)[property];
-      if (propState === undefined) return undefined;
-
-      const value = valueAt(this.core.getCurrentState(), propState);
-      return value === undefined ? value : this.toStorableValue(value);
-    };
-
-    const subjectBox = observable.box(
-      new ObservableSubject<Shape[string]>(
-        onPropertyChange,
-        getStorableValueOfProperty
-      )
-    );
-
-    this.idForProxyMap.set(subjectBox.get().proxy, key);
-
-    const setPropIsObserved = () =>
-      setTimeout(
-        action(() => this.observedKeys.add(key)),
-        0
-      );
-    setPropIsObserved(); // default to assume we are in an observable context
-    onBecomeObserved(subjectBox, setPropIsObserved);
-    const setPropIsUnobserved = () =>
-      setTimeout(
-        action(() => this.observedKeys.delete(key)),
-        0
-      );
-    onBecomeUnobserved(subjectBox, setPropIsUnobserved);
-
-    this.subjectBoxes.set(key, subjectBox);
-    return subjectBox;
-  }
-
-  public getSubject = (key: string): ObservableSubject<Shape[string]> => {
-    return this.getSubjectBox(key).get();
-  };
 
   public root: Shape = new Proxy<Shape>({} as any, {
     get: (_: any, key: string | number | symbol) => {
@@ -192,7 +162,7 @@ export class ObservableCore<Shape extends Everything = Everything> {
     },
     getOwnPropertyDescriptor,
     ownKeys: () => {
-      return [...this.subjectBoxes.keys()];
+      return Array.from(this.subjectCache.keys());
     },
   });
 }

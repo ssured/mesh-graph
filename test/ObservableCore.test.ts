@@ -4,7 +4,7 @@ import { autorun } from 'mobx';
 import { LRUSet } from '../src/utils';
 
 describe('Observable core integrates mobx and core', () => {
-  test('it works unobserved', () => {
+  test('it works unobserved', async () => {
     let state = 'state';
     const core = new Core({
       getCurrentState: () => state,
@@ -19,7 +19,13 @@ describe('Observable core integrates mobx and core', () => {
       };
     });
 
-    const observableCore = new ObservableCore(core);
+    const observedKeys = new Set<string>();
+
+    const observableCore = new ObservableCore(
+      key => observedKeys.add(key),
+      key => observedKeys.delete(key),
+      core
+    );
     const { root } = observableCore;
     expect(root.subject.property).toBeUndefined();
 
@@ -32,8 +38,8 @@ describe('Observable core integrates mobx and core', () => {
 
     expect(root.subject.property).toBeUndefined();
     expect(Object.keys(root)).toEqual(['subject']);
-    expect([...observableCore.observedKeys]).toEqual(['subject']);
-    expect(Object.keys(root.subject)).toEqual([]);
+    expect(Array.from(observedKeys)).toEqual([]);
+    expect(Object.keys(root.subject)).toEqual(['property']);
 
     emit(new PutMessage('subject', { property: { [state]: [0, 'value'] } }));
     expect(messages.splice(0)).toEqual([]);
@@ -42,7 +48,7 @@ describe('Observable core integrates mobx and core', () => {
     expect(Object.keys(root.subject)).toEqual(['property']);
   });
 
-  test('it works observed', () => {
+  test('it works observed', async () => {
     let state = 'state';
     const core = new Core({
       getCurrentState: () => state,
@@ -69,7 +75,13 @@ describe('Observable core integrates mobx and core', () => {
       };
     });
 
-    const observableCore = new ObservableCore(core);
+    const observedKeys = new Set<string>();
+
+    const observableCore = new ObservableCore(
+      key => observedKeys.add(key),
+      key => observedKeys.delete(key),
+      core
+    );
     const { root } = observableCore;
 
     const values: any[] = [];
@@ -88,8 +100,8 @@ describe('Observable core integrates mobx and core', () => {
 
     expect(root.subject.property).toBeUndefined();
     expect(Object.keys(root)).toEqual(['subject']);
-    expect([...observableCore.observedKeys]).toEqual(['subject']);
-    expect(Object.keys(root.subject)).toEqual([]);
+    expect(Array.from(observedKeys)).toEqual(['subject']);
+    expect(Object.keys(root.subject)).toEqual(['toJSON', 'property']);
 
     emit(new PutMessage('subject', { property: { [state]: [0, 'value'] } }));
     expect(messages.splice(0)).toEqual([]);
@@ -100,9 +112,9 @@ describe('Observable core integrates mobx and core', () => {
     ]);
 
     expect(root.subject.property).toBe('value');
-    expect(Object.keys(root.subject)).toEqual(['property']);
+    expect(Object.keys(root.subject)).toEqual(['toJSON', 'property']);
 
     disposer();
-    expect([...observableCore.observedKeys]).toEqual([]);
+    expect(Array.from(observedKeys)).toEqual([]);
   });
 });

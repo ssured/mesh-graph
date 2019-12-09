@@ -79,20 +79,28 @@ export class Core implements CRDT {
   })();
 
   protected hub = new EventHub<CRDTNodeMessage>((source, message) => {
+    const messageSentByCore = source === this.listener;
+
+    console.log(
+      `HUB ${messageSentByCore ? 'door core' : 'remote'} ${JSON.stringify(
+        message
+      )}`
+    );
+
     if (message.type === 'put') {
       if (Object.keys(message.payload.value).length === 0) {
         return () => false; // skip all further processing
       }
 
-      if (source !== this.listener) {
+      if (messageSentByCore) {
+        // do not send our put messages to their original source
+        return listener =>
+          !this._getMsgIdsCache(listener).has(message.payload.replyTo!);
+      } else {
         // intercept put messages from others
         // don't forward these messages to everybody, but handle it ourselves
         this._getMsgIdsCache(source).add(message.msgId);
         return listener => listener === this.listener;
-      } else {
-        // do not send our put messages to their original source
-        return listener =>
-          !this._getMsgIdsCache(listener).has(message.payload.replyTo!);
       }
     }
 
