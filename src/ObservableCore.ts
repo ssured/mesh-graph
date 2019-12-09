@@ -62,7 +62,7 @@ class ObservableSubject<Shape extends StorableObject> {
     },
     getOwnPropertyDescriptor,
     ownKeys: () => {
-      return [...this.ownKeys];
+      return Array.from(this.ownKeys);
     },
   });
 }
