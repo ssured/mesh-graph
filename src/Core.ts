@@ -1,7 +1,7 @@
 import {
   mergeNodeState as defaultMerge,
   SubjectPropertyState as State,
-  pickState,
+  pickKeys,
 } from './crdt';
 import {
   generateId as defaultGenerateId,
@@ -187,7 +187,7 @@ export class Core implements CRDT {
     const current = this.get(id);
     const changes = this.config.merge(current, incoming);
     if (changes.size > 0) {
-      this.emit(new PutMessage(id, pickState(incoming, changes), message));
+      this.emit(new PutMessage(id, pickKeys(incoming, changes), message));
     }
     return changes;
   }

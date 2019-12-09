@@ -59,7 +59,7 @@ export function mergeNodeState(
 }
 
 // filter state
-export const pickState = (
+export const pickKeys = (
   state: SubjectPropertyState,
   keys: Set<string>
 ): SubjectPropertyState =>
