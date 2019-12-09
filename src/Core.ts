@@ -47,6 +47,7 @@ export const defaultCoreConfig = {
   merge: defaultMerge,
   generateId: defaultGenerateId,
   getCurrentState: defaultGetCurrentState,
+  createNewState: (_id: string): State => ({}),
 };
 
 interface CRDT {
@@ -135,8 +136,8 @@ export class Core implements CRDT {
   protected pendingIds = new Map<string, Lambda>();
   protected stateMap = new Map<string, State>();
 
-  public createNewState(_id: string): State {
-    return {};
+  public createNewState(id: string): State {
+    return this.config.createNewState(id);
   }
 
   public has(id: string): boolean {
