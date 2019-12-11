@@ -80,15 +80,10 @@ export class Core implements CRDT {
 
   protected hub = new EventHub<CRDTNodeMessage>((source, message) => {
     const messageSentByCore = source === this.listener;
+
     if (!messageSentByCore) {
       this._getMsgIdsCache(source).add(message.msgId);
     }
-
-    console.log(
-      `HUB ${messageSentByCore ? 'door core' : 'remote'} ${JSON.stringify(
-        message
-      )}`
-    );
 
     if (message.type === 'put') {
       if (Object.keys(message.payload.value).length === 0) {
