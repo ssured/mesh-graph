@@ -128,7 +128,8 @@ export class Core implements CRDT {
     this.connect(emit => {
       this.emit = emit;
       this.listener = message => {
-        if (message.type !== 'put' || !this.has(message.payload.key)) return;
+        if (message.type === 'get') return; // we do not provide information
+        if (!this.has(message.payload.key)) return; // we only collect data of known keys
         this.merge(message.payload.key, message.payload.value, message);
       };
       return this.listener;

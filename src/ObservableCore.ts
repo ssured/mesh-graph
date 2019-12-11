@@ -71,6 +71,10 @@ class SubjectHandler {
           this.notifyChange(key);
           return true;
         },
+        has: (_: any, key: string) => {
+          if (typeof key !== 'string') return Reflect.has(_, key);
+          return this.propertyAtoms.has(key);
+        },
         getOwnPropertyDescriptor,
         ownKeys: () => {
           return Array.from(this.propertyAtoms.keys());
@@ -94,7 +98,8 @@ export class ObservableCore<Shape extends Everything = Everything> {
     core.connect(emit => {
       this.emit = emit;
       return message => {
-        if (message.type !== 'put') return;
+        if (message.type === 'get') return; // we do not provide information
+
         const { key, value } = message.payload;
 
         if (!this.subjectCache.has(key)) return;
@@ -113,7 +118,7 @@ export class ObservableCore<Shape extends Everything = Everything> {
 
     const handler: SubjectHandler = new SubjectHandler(this, uuid);
     this.subjectCache.set(uuid, handler);
-    // this.emit(new GetMessage(uuid));
+    this.core.get(uuid); // make sure core knows we are reading the subject
     return handler;
   }
 
@@ -159,6 +164,9 @@ export class ObservableCore<Shape extends Everything = Everything> {
     },
     set: () => {
       return false;
+    },
+    has: () => {
+      return true;
     },
     getOwnPropertyDescriptor,
     ownKeys: () => {

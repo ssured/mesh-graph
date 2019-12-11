@@ -5,7 +5,7 @@ import { LRUSet } from '../src/utils';
 
 describe('Observable core integrates mobx and core', () => {
   test('it works unobserved', async () => {
-    let state = 'state';
+    let state = 'now';
     const core = new Core({
       getCurrentState: () => state,
     });
@@ -116,5 +116,321 @@ describe('Observable core integrates mobx and core', () => {
 
     disposer();
     expect(Array.from(observedKeys)).toEqual([]);
+  });
+
+  test('single value updates', async () => {
+    let state = 'state';
+    const core = new Core({
+      getCurrentState: () => state,
+    });
+
+    let current = 1;
+    const ids = new Map<string, string>();
+
+    const Amessages: any[] = [];
+    core.connect(emit => async message => {
+      // record for testing
+      const { msgId, ...body } = message;
+      ids.set(msgId, String(current++));
+      if (body.type === 'put' && body.payload.replyTo) {
+        body.payload.replyTo = ids.get(body.payload.replyTo) || '???';
+      }
+      Amessages.push({ msgId: ids.get(msgId)!, ...body });
+
+      // answer
+      if (message.type === 'get') {
+        await new Promise(res => setTimeout(res, 10));
+        emit(
+          new PutMessage(
+            message.payload.key,
+            {
+              property: { [state]: [0, 'value'] },
+            },
+            message
+          )
+        );
+      }
+    });
+
+    const Bmessages: any[] = [];
+    core.connect(_emit => async message => {
+      // record for testing
+      const { msgId, ...body } = message;
+      ids.set(msgId, String(current++));
+      if (body.type === 'put' && body.payload.replyTo) {
+        body.payload.replyTo = ids.get(body.payload.replyTo) || '???';
+      }
+      Bmessages.push({ msgId: ids.get(msgId)!, ...body });
+    });
+
+    const observedKeys = new Set<string>();
+
+    const observableCore = new ObservableCore(
+      key => observedKeys.add(key),
+      key => observedKeys.delete(key),
+      core
+    );
+    const { root } = observableCore;
+
+    const values: any[] = [];
+
+    {
+      const stop = autorun(() => values.push(root.subject.property));
+
+      expect(values.splice(0)).toEqual([undefined]);
+
+      expect(Array.from(observedKeys)).toEqual(['subject']);
+      expect(Amessages.splice(0)).toEqual([
+        { msgId: '1', type: 'get', payload: { key: 'subject' } },
+      ]);
+      expect(Bmessages.splice(0)).toEqual([
+        { msgId: '2', type: 'get', payload: { key: 'subject' } },
+      ]);
+
+      await new Promise(res => setTimeout(res, 10));
+
+      expect(root.subject.property).toEqual('value');
+      expect(values.splice(0)).toEqual(['value']);
+
+      expect(Array.from(observedKeys)).toEqual(['subject']);
+      expect(Amessages.splice(0)).toEqual([]);
+      expect(Bmessages.splice(0)).toEqual([
+        {
+          msgId: '3',
+          type: 'put',
+          payload: {
+            key: 'subject',
+            value: {
+              property: { [state]: [0, 'value'] },
+            },
+            replyTo: '???',
+          },
+        },
+      ]);
+
+      stop();
+    }
+  });
+
+  test('linked objects updates', async () => {
+    let state = 'state';
+    const core = new Core({
+      getCurrentState: () => state,
+    });
+
+    let current = 1;
+    const ids = new Map<string, string>();
+
+    const Amessages: any[] = [];
+    core.connect(emit => async message => {
+      // record for testing
+      const { msgId, ...body } = message;
+      ids.set(msgId, String(current++));
+      if (body.type === 'put' && body.payload.replyTo) {
+        body.payload.replyTo = ids.get(body.payload.replyTo) || '???';
+      }
+      Amessages.push({ msgId: ids.get(msgId)!, ...body });
+
+      // answer
+      if (message.type === 'get') {
+        await new Promise(res => setTimeout(res, 10));
+        switch (message.payload.key) {
+          case 'subject':
+            emit(
+              new PutMessage(
+                message.payload.key,
+                {
+                  linked: { [state]: [1, 'linkedsubject'] },
+                },
+                message
+              )
+            );
+            break;
+          case 'linkedsubject':
+            emit(
+              new PutMessage(
+                message.payload.key,
+                {
+                  property: { [state]: [0, 'value'] },
+                },
+                message
+              )
+            );
+            break;
+        }
+      }
+    });
+
+    const Bmessages: any[] = [];
+    core.connect(_emit => async message => {
+      // record for testing
+      const { msgId, ...body } = message;
+      ids.set(msgId, String(current++));
+      if (body.type === 'put' && body.payload.replyTo) {
+        body.payload.replyTo = ids.get(body.payload.replyTo) || '???';
+      }
+      Bmessages.push({ msgId: ids.get(msgId)!, ...body });
+    });
+
+    const observedKeys = new Set<string>();
+
+    const observableCore = new ObservableCore(
+      key => observedKeys.add(key),
+      key => observedKeys.delete(key),
+      core
+    );
+    const { root } = observableCore;
+
+    const values: any[] = [];
+
+    {
+      const stop = autorun(() =>
+        values.push(
+          root.subject.linked && (root.subject.linked as any).property
+        )
+      );
+
+      expect(values.splice(0)).toEqual([undefined]);
+
+      expect(Array.from(observedKeys)).toEqual(['subject']);
+      expect(Amessages.splice(0)).toEqual([
+        { msgId: '1', type: 'get', payload: { key: 'subject' } },
+      ]);
+      expect(Bmessages.splice(0)).toEqual([
+        { msgId: '2', type: 'get', payload: { key: 'subject' } },
+      ]);
+
+      await new Promise(res => setTimeout(res, 10));
+
+      expect(root.subject.linked).toBeDefined();
+      expect(values.splice(0)).toEqual([undefined]);
+
+      expect(Array.from(observedKeys)).toEqual(['subject', 'linkedsubject']);
+      expect(Amessages.splice(0)).toEqual([
+        {
+          msgId: '4',
+          type: 'get',
+          payload: {
+            key: 'linkedsubject',
+          },
+        },
+      ]);
+      expect(Bmessages.splice(0)).toEqual([
+        {
+          msgId: '3',
+          type: 'put',
+          payload: {
+            key: 'subject',
+            value: {
+              linked: { [state]: [1, 'linkedsubject'] },
+            },
+            replyTo: '???',
+          },
+        },
+        {
+          msgId: '5',
+          type: 'get',
+          payload: {
+            key: 'linkedsubject',
+          },
+        },
+      ]);
+
+      await new Promise(res => setTimeout(res, 10));
+
+      expect((root.subject.linked as any).property).toEqual('value');
+      expect(values.splice(0)).toEqual(['value']);
+
+      expect(Array.from(observedKeys)).toEqual(['subject', 'linkedsubject']);
+      expect(Amessages.splice(0)).toEqual([]);
+      expect(Bmessages.splice(0)).toEqual([
+        {
+          msgId: '6',
+          type: 'put',
+          payload: {
+            key: 'linkedsubject',
+            value: {
+              property: { [state]: [0, 'value'] },
+            },
+            replyTo: '???',
+          },
+        },
+      ]);
+
+      stop();
+
+      expect(Array.from(observedKeys)).toEqual([]);
+    }
+  });
+
+  test('setters and linked objects', async () => {
+    let state = 'state';
+    const core = new Core({
+      getCurrentState: () => state,
+    });
+
+    let current = 1;
+    const ids = new Map<string, string>();
+
+    const Amessages: any[] = [];
+    core.connect(_emit => async message => {
+      // record for testing
+      const { msgId, ...body } = message;
+      ids.set(msgId, String(current++));
+      if (body.type === 'put' && body.payload.replyTo) {
+        body.payload.replyTo = ids.get(body.payload.replyTo) || '???';
+      }
+      Amessages.push({ msgId: ids.get(msgId)!, ...body });
+
+      // answer
+      if (message.type === 'get') {
+        await new Promise(res => setTimeout(res, 10));
+        switch (message.payload.key) {
+          case 'subject':
+            break;
+        }
+      }
+    });
+
+    const observedKeys = new Set<string>();
+
+    const observableCore = new ObservableCore(
+      key => observedKeys.add(key),
+      key => observedKeys.delete(key),
+      core
+    );
+    const { root } = observableCore;
+
+    const values: any[] = [];
+
+    {
+      root.subject.property = 'yo fuf';
+      expect(Amessages.splice(0)).toEqual([
+        {
+          msgId: '1',
+          type: 'get',
+          payload: {
+            key: 'subject',
+          },
+        },
+        {
+          msgId: '2',
+          type: 'put',
+          payload: {
+            key: 'subject',
+            value: { property: { [state]: [0, 'yo fuf'] } },
+            replyTo: '???',
+          },
+        },
+      ]);
+
+      const stop = autorun(() => values.push(root.subject.property));
+
+      expect(values.splice(0)).toEqual(['yo fuf']);
+
+      stop();
+
+      expect(Array.from(observedKeys)).toEqual([]);
+    }
   });
 });
