@@ -1,8 +1,7 @@
 import { createAtom, IAtom } from 'mobx';
 import { Core, Emit, PutMessage } from './Core';
 import { Everything, PropTypes, StorableValue, Value, valueAt } from './crdt';
-
-const uuidLookup = new WeakMap<object, string>();
+import { generateId } from './utils';
 
 class SubjectHandler {
   constructor(protected graph: ObservableCore, public readonly uuid: string) {}
@@ -81,14 +80,13 @@ class SubjectHandler {
         },
       }
     );
-
-    uuidLookup.set(this._proxy, this.uuid);
     return this._proxy;
   }
 }
 
 export class ObservableCore<Shape extends Everything = Everything> {
   private emit!: Emit;
+  private uuidLookup = new WeakMap<object, string>();
 
   constructor(
     public onObserved: (key: string) => void,
@@ -118,7 +116,8 @@ export class ObservableCore<Shape extends Everything = Everything> {
 
     const handler: SubjectHandler = new SubjectHandler(this, uuid);
     this.subjectCache.set(uuid, handler);
-    this.core.get(uuid); // make sure core knows we are reading the subject
+    this.core.touch(uuid); // make sure core knows we are reading the subject
+    this.uuidLookup.set(handler.proxy, uuid);
     return handler;
   }
 
@@ -145,7 +144,7 @@ export class ObservableCore<Shape extends Everything = Everything> {
     if (storableValue == null || typeof storableValue !== 'object') {
       return [PropTypes.Primitive, storableValue];
     }
-    const id = uuidLookup.get(storableValue);
+    const id = this.uuidLookup.get(storableValue);
     if (id == null)
       throw new Error(`cannot convert ${JSON.stringify(storableValue)}`);
 
@@ -155,6 +154,12 @@ export class ObservableCore<Shape extends Everything = Everything> {
   private toStorableValue(value: Value): Exclude<StorableValue, undefined> {
     return value[0] === PropTypes.Primitive ? value[1] : this.root[value[1]];
   }
+
+  public node = <O extends object>(o: O): O => {
+    return this.uuidLookup.get(o)
+      ? o
+      : Object.assign((this.root as Everything)[generateId()], o);
+  };
 
   public root: Shape = new Proxy<Shape>({} as any, {
     get: (_: any, key: string | number | symbol) => {

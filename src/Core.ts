@@ -51,7 +51,6 @@ export const defaultCoreConfig = {
 };
 
 interface CRDT {
-  createNewState(id: string): State;
   has(id: string): boolean;
   get(id: string): State;
   isReady(id: string): boolean;
@@ -67,6 +66,8 @@ export class Core implements CRDT {
   protected config: typeof defaultCoreConfig;
   protected emit!: Emit;
   private listener!: Listener;
+
+  protected touchedIds = new Set<string>();
 
   private _getMsgIdsCache: (listener: Listener) => LRUSet = (() => {
     const wm = new WeakMap<Listener, LRUSet>();
@@ -129,7 +130,11 @@ export class Core implements CRDT {
       this.emit = emit;
       this.listener = message => {
         if (message.type === 'get') return; // we do not provide information
-        if (!this.has(message.payload.key)) return; // we only collect data of known keys
+
+        if (!this.has(message.payload.key)) {
+          return; // we only collect data of known keys
+        }
+
         this.merge(message.payload.key, message.payload.value, message);
       };
       return this.listener;
@@ -142,17 +147,17 @@ export class Core implements CRDT {
   protected pendingIds = new Map<string, Lambda>();
   protected stateMap = new Map<string, State>();
 
-  public createNewState(id: string): State {
-    return this.config.createNewState(id);
-  }
-
   public has(id: string): boolean {
-    return this.stateMap.has(id);
+    return this.stateMap.has(id) || this.touchedIds.has(id);
   }
 
   public get(id: string): State {
     if (!this.stateMap.has(id)) {
-      const state = this.createNewState(id);
+      if (this.touchedIds.has(id)) {
+        this.touchedIds.delete(id);
+      }
+
+      const state = this.config.createNewState(id);
       this.stateMap.set(id, state);
 
       const request = new GetMessage(id);
@@ -172,6 +177,16 @@ export class Core implements CRDT {
       );
     }
     return this.stateMap.get(id)!;
+  }
+
+  /**
+   * Notify the Core that it should record put messages with the provided id.
+   * @param id
+   */
+  public touch(id: string): void {
+    if (!this.stateMap.has(id)) {
+      this.touchedIds.add(id);
+    }
   }
 
   public isReady(id: string) {
