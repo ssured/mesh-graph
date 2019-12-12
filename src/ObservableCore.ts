@@ -1,42 +1,52 @@
 import { createAtom, IAtom } from 'mobx';
 import { Core, Emit, PutMessage } from './Core';
-import { Everything, PropTypes, StorableValue, Value, valueAt } from './crdt';
+import {
+  Everything,
+  PropTypes,
+  StorableValue,
+  Value,
+  valueAt,
+  SubjectPropertyState,
+} from './crdt';
 import { generateId } from './utils';
 
 class SubjectHandler {
-  constructor(protected graph: ObservableCore, public readonly uuid: string) {}
+  constructor(
+    protected graph: ObservableCore,
+    public readonly subject: string
+  ) {}
 
   private observedCount = 0;
   private addObserved = (): void => {
     if (this.observedCount === 0) {
-      this.graph.onObserved(this.uuid);
+      this.graph.onObserved(this.subject);
     }
     this.observedCount += 1;
   };
   private removeObserved = (): void => {
     this.observedCount -= 1;
     if (this.observedCount === 0) {
-      this.graph.onUnobserved(this.uuid);
+      this.graph.onUnobserved(this.subject);
     }
   };
 
   private thisAtom = createAtom(
-    `[${this.uuid}]`,
+    `[${this.subject}]`,
     this.addObserved,
     this.removeObserved
   );
   private propertyAtoms = new Map<string, IAtom>();
 
-  private getPropertyAtom(key: string): IAtom {
-    const current = this.propertyAtoms.get(key);
+  private getPropertyAtom(property: string): IAtom {
+    const current = this.propertyAtoms.get(property);
     if (current) return current;
 
     const atom = createAtom(
-      `[${this.uuid}]:${key}`,
+      `[${this.subject}]:${property}`,
       this.addObserved,
       this.removeObserved
     );
-    this.propertyAtoms.set(key, atom);
+    this.propertyAtoms.set(property, atom);
     this.thisAtom.reportChanged();
     return atom;
   }
@@ -61,22 +71,24 @@ class SubjectHandler {
         get: (_: any, key: string | number | symbol) => {
           if (typeof key !== 'string') return Reflect.get(_, key);
           this.getPropertyAtom(key).reportObserved();
-          return this.graph.get(this.uuid, key);
+          return this.graph.get(this.subject, key);
         },
         set: (_: any, key: string | number | symbol, value: any) => {
           if (typeof key !== 'string') return Reflect.set(_, key, value);
           if (value === undefined) return false;
-          this.graph.set(this.uuid, key, value);
+          this.graph.set(this.subject, key, value);
           this.notifyChange(key);
           return true;
         },
         has: (_: any, key: string) => {
           if (typeof key !== 'string') return Reflect.has(_, key);
-          return this.propertyAtoms.has(key);
+          if (!this.propertyAtoms.has(key)) return false;
+          this.propertyAtoms.get(key)!.reportObserved();
+          return true;
         },
         getOwnPropertyDescriptor,
         ownKeys: () => {
-          return Array.from(this.propertyAtoms.keys());
+          return Object.keys(this.graph.getState(this.subject));
         },
       }
     );
@@ -121,10 +133,14 @@ export class ObservableCore<Shape extends Everything = Everything> {
     return handler;
   }
 
+  public getState(subject: string): SubjectPropertyState {
+    return this.core.get(subject);
+  }
+
   public get(subject: string, property: string): StorableValue {
     const value = valueAt(
       this.core.getCurrentState(),
-      this.core.get(subject)[property] || {}
+      this.getState(subject)[property] || {}
     );
     return value === undefined ? undefined : this.toStorableValue(value);
   }

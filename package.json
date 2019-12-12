@@ -1,6 +1,6 @@
 {
   "name": "mesh-graph",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "license": "UNLICENSED",
   "author": "Sjoerd de Jong",
   "main": "dist/index.js",
